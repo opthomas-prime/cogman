@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+    "encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,15 +15,21 @@ import (
 	"google.golang.org/api/option"
 )
 
+type application struct {
+     Service *calendar.Service 
+}
+
 func getClient(config *oauth2.Config) *http.Client {
-	//tokFile := "token.json"
-	//tok, err := tokenFromFile(tokFile)
-	tok := getTokenFromWeb(config)
+	tokFile := "token.json"
+	tok, err := tokenFromFile(tokFile)
+    if err != nil {
+        tok = getTokenFromWeb(config)
+        saveToken(tokFile, tok)
+    }
 	return config.Client(context.Background(), tok)
 }
 
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 	fmt.Printf("Go to the following link in your browser then type the "+
 		"authorization code: \n%v\n", authURL)
@@ -38,14 +45,77 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	return tok
 }
 
+func tokenFromFile(file string) (*oauth2.Token, error) {
+    f, err := os.Open(file)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+    tok := &oauth2.Token{}
+    err = json.NewDecoder(f).Decode(tok)
+    return tok, err
+}
+
+func saveToken(path string, token *oauth2.Token) {
+    fmt.Printf("Saving credential file to: %s\n", path)
+    f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+    if err != nil {
+        log.Fatalf("Unable to cache oauth token: %v", err)
+    }
+    defer f.Close()
+    json.NewEncoder(f).Encode(token)
+}
+
+func createEvent(desc, start, end string) *calendar.Event {
+    // Currently limited to: Description, Start and End time
+    newEvent := calendar.Event{
+        Description: desc, 
+        Start: &calendar.EventDateTime{
+            DateTime: start,
+        },
+        End: &calendar.EventDateTime{
+            DateTime: end,
+        },
+    }
+    return &newEvent
+}
+
+// Basic Workflow for Data retrieval
+// 1) Get all events from 00:00 to 23:59 and store as a 'Day' data structure linked to a user account
+// 1a) Filter events from the past day
+// 1b) Create users 
+// 1c) Create db for users
+
+func handleRedirectURI(w http.ResponseWriter, r *http.Request) {
+	// Get the "code" query parameter from the redirect URI
+	code := r.URL.Query().Get("code")
+
+	if code != "" {
+		// You have successfully obtained the OAuth2 authorization code
+		// You can use it to exchange for an access token with the OAuth2 provider.
+		fmt.Println("OAuth2 Authorization Code:", code)
+	} else {
+		fmt.Println("No OAuth2 Authorization Code found in the redirect URI.")
+	}
+
+	// Handle other logic based on the authorization code if needed
+	// ...
+}
+
 func main() {
-	ctx := context.Background()
+	http.HandleFunc("/", handleRedirectURI)
+    go func() {
+        if err := http.ListenAndServe(":4000", nil); err != nil {
+            fmt.Println("Error starting the server:", err)
+        }
+    }()
+    ctx := context.Background()
 	creds, err := os.ReadFile("credentials.json")
 	if err != nil {
 		log.Fatalf("Unable to read cred file: %v", err)
 	}
 
-	config, err := google.ConfigFromJSON(creds, calendar.CalendarReadonlyScope)
+	config, err := google.ConfigFromJSON(creds, calendar.CalendarEventsScope)
 	if err != nil {
 		log.Fatalf("Unable to parse cred file to config: %v", err)
 	}
@@ -57,11 +127,16 @@ func main() {
 		log.Fatalf("Unable to retrieve Calendar client: %v", err)
 	}
 
-	t := time.Now().Format(time.RFC3339)
+    currentT := time.Now()
+	t := currentT.Format(time.RFC3339)
+    startOfDay := time.Date(currentT.Year(), currentT.Month(), currentT.Day(), 0, 0, 0, 0, currentT.Location())
+    endOfDay := startOfDay.Add(time.Hour * 24).Add(-time.Second)
+
 	events, err := srv.Events.List("primary").ShowDeleted(false).
-		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+		SingleEvents(true).TimeMin(startOfDay.Format(time.RFC3339)).
+        TimeMax(endOfDay.Format(time.RFC3339)).OrderBy("startTime").Do()
 	if err != nil {
-		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
+		log.Fatalf("Unable to retrieve past day of user's events: %v", err)
 	}
 	fmt.Println("Upcoming events:")
 	if len(events.Items) == 0 {
@@ -75,4 +150,15 @@ func main() {
 			fmt.Printf("%v (%v)\n", item.Summary, date)
 		}
 	}
+
+    newEvent := createEvent("new event", t, time.Now().Add(time.Hour * 1).Format(time.RFC3339))
+    evt, err := srv.Events.Insert("primary", newEvent).Do()
+    if err != nil {
+        log.Fatalf("Unable to create new event in calendar: %v", err)
+    }
+    fmt.Println("New event created: ")
+	fmt.Printf("%v \n", evt.Description)
+    
+
 }
+
