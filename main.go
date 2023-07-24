@@ -16,7 +16,8 @@ import (
 )
 
 type application struct {
-     Service *calendar.Service 
+    cfg    *oauth2.Config
+    client *http.Client
 }
 
 func getClient(config *oauth2.Config) *http.Client {
@@ -86,42 +87,32 @@ func createEvent(desc, start, end string) *calendar.Event {
 // 1b) Create users 
 // 1c) Create db for users
 
-func handleRedirectURI(w http.ResponseWriter, r *http.Request) {
+func (app *application) handleRedirectURI(w http.ResponseWriter, r *http.Request) {
+    // TODO:
+    // - make this handler only run the auth code stuff if it detects the "code" in the URL
+    // - otherwise just serve the home page of this application
+
 	// Get the "code" query parameter from the redirect URI
 	code := r.URL.Query().Get("code")
 
 	if code != "" {
-		// You have successfully obtained the OAuth2 authorization code
-		// You can use it to exchange for an access token with the OAuth2 provider.
 		fmt.Println("OAuth2 Authorization Code:", code)
 	} else {
 		fmt.Println("No OAuth2 Authorization Code found in the redirect URI.")
 	}
 
 	// Handle other logic based on the authorization code if needed
-	// ...
+	tok, err := app.cfg.Exchange(context.TODO(), code)
+	if err != nil {
+		log.Fatalf("Unable to retrieve token from web: %v", err)
+	}
+    app.client = app.cfg.Client(context.Background(), tok)
+    w.Write([]byte("OK"))
 }
 
-func main() {
-	http.HandleFunc("/", handleRedirectURI)
-    go func() {
-        if err := http.ListenAndServe(":4000", nil); err != nil {
-            fmt.Println("Error starting the server:", err)
-        }
-    }()
+func (app *application) calendarStuff(w http.ResponseWriter, r *http.Request) {
     ctx := context.Background()
-	creds, err := os.ReadFile("credentials.json")
-	if err != nil {
-		log.Fatalf("Unable to read cred file: %v", err)
-	}
-
-	config, err := google.ConfigFromJSON(creds, calendar.CalendarEventsScope)
-	if err != nil {
-		log.Fatalf("Unable to parse cred file to config: %v", err)
-	}
-
-	client := getClient(config)
-
+    client := app.client
 	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		log.Fatalf("Unable to retrieve Calendar client: %v", err)
@@ -158,7 +149,32 @@ func main() {
     }
     fmt.Println("New event created: ")
 	fmt.Printf("%v \n", evt.Description)
-    
+    }
 
+func main() {
+	creds, err := os.ReadFile("credentials.json")
+	if err != nil {
+		log.Fatalf("Unable to read cred file: %v", err)
+	}
+    
+	config, err := google.ConfigFromJSON(creds, calendar.CalendarEventsScope)
+	if err != nil {
+		log.Fatalf("Unable to parse cred file to config: %v", err)
+	}
+
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	fmt.Printf("Go to the following link in your browser then type the "+
+		"authorization code: \n%v\n", authURL)
+
+    app := application{
+        cfg: config, 
+    }
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/", app.handleRedirectURI)
+    mux.HandleFunc("/cal", app.calendarStuff)
+    log.Print("Starting server on :4000")
+    err = http.ListenAndServe(":4000", mux)
+    log.Fatal(err)
 }
 
