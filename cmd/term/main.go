@@ -45,7 +45,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	s := "What should we buy at the market?\n\n"
+	s := "Friday, November 10, 2023 - Tasks to Complete\n=================================================\n\n"
 
 	for i, choice := range m.choices {
 		cursor := " "
@@ -68,7 +68,7 @@ func (m model) View() string {
 
 func initialModel() model {
 	return model{
-		choices: []string{"Buy carrots", "Buy celery", "Buy kohlrabi"},
+		choices: []string{"(10:00 - 11:00) Work on Productivity CLI", "(11:00 - 12:30) Exercise", "(13:00 - 14:30) Add Automated Testing to P.A."},
 		selected: make(map[int]struct{}),
 	}
 }
