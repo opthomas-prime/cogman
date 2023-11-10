@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const url = "https://charm.sh"
@@ -15,12 +17,16 @@ type model struct {
 	choices []string
 	cursor int
 	selected map[int]struct{}
+	spinner spinner.Model
 	status int
 	err error
 }
 
 func (m model) Init() tea.Cmd {
-	return checkServer
+	return tea.Batch(
+		doHttpRequest,
+		m.spinner.Tick,
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -54,8 +60,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected[m.cursor] = struct{}{}
 			}
 		}
-	}
 
+	default:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -65,7 +75,7 @@ func (m model) View() string {
 	}
 
 	s := "Friday, November 10, 2023 - Tasks to Complete\n=================================================\n\n"
-	s += fmt.Sprintf("%d %s!\n\n", m.status, http.StatusText(m.status))
+	s += fmt.Sprintf("%s %d %s!\n\n", m.spinner.View(), m.status, http.StatusText(m.status))
 
 	for i, choice := range m.choices {
 		cursor := " "
@@ -87,14 +97,19 @@ func (m model) View() string {
 }
 
 func initialModel() model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	
 	return model{
+		spinner: s,	
 		choices: []string{"(10:00 - 11:00) Work on Productivity CLI", "(11:00 - 12:30) Exercise", "(13:00 - 14:30) Add Automated Testing to P.A."},
 		selected: make(map[int]struct{}),
 		status: 102,
 	}
 }
 
-func checkServer() tea.Msg {
+func doHttpRequest() tea.Msg {
 	time.Sleep(5 * time.Second)
 	c := &http.Client{Timeout: 10 * time.Second}
 	res, err := c.Get(url)
