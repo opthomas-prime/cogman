@@ -3,22 +3,37 @@ package main
 import (
 	"fmt"
 	"os"
+	"net/http"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+const url = "https://charm.sh"
 
 type model struct {
 	choices []string
 	cursor int
 	selected map[int]struct{}
+	status int
+	err error
 }
 
 func (m model) Init() tea.Cmd {
-	return nil
+	return checkServer
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	
+	case statusMsg:
+		m.status = int(msg)
+		return m, nil
+	
+	case errMsg:
+		m.err = msg
+		return m, tea.Quit
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -45,7 +60,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	if m.err != nil {
+		return fmt.Sprintf("\nWe had some trouble: %v\n\n", m.err)
+	}
+
 	s := "Friday, November 10, 2023 - Tasks to Complete\n=================================================\n\n"
+	s += fmt.Sprintf("%d %s!\n\n", m.status, http.StatusText(m.status))
 
 	for i, choice := range m.choices {
 		cursor := " "
@@ -70,8 +90,25 @@ func initialModel() model {
 	return model{
 		choices: []string{"(10:00 - 11:00) Work on Productivity CLI", "(11:00 - 12:30) Exercise", "(13:00 - 14:30) Add Automated Testing to P.A."},
 		selected: make(map[int]struct{}),
+		status: 102,
 	}
 }
+
+func checkServer() tea.Msg {
+	time.Sleep(5 * time.Second)
+	c := &http.Client{Timeout: 10 * time.Second}
+	res, err := c.Get(url)
+	if err != nil {
+		return errMsg{err}
+	}
+	return statusMsg(res.StatusCode)
+}
+
+type statusMsg int
+
+type errMsg struct{ err error }
+
+func (e errMsg) Error() string { return e.err.Error() }
 
 func main() {
 	p := tea.NewProgram(initialModel())
