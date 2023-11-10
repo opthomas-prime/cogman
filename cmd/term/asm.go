@@ -70,6 +70,7 @@ func (m applicationStateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m applicationStateModel) View() string {
 	// TODO (cmz): Refactor to Builder pattern
+	// TODO (cmz): Create the concept of React-like components to allow enable multiple developers to work on this at one time
 	if m.err != nil {
 		return fmt.Sprintf("\nWe had some trouble: %v\n\n", m.err)
 	}
